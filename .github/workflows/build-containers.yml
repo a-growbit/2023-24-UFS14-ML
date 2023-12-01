@@ -35,3 +35,55 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Docker ECR login
+        run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:1.5.0-cpu-py3
+        env: # see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Docker build my-custom-sagemaker-training-image
+        run: |
+          # Specify an image name
+          image_name=my-custom-sagemaker-training-image
+          echo "image_name: ${image_name} ######################"
+
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "account: ${account} ######################"
+
+          # Get the region defined in the current configuration (default to us-west-2 if none defined)
+          region=$AWS_DEFAULT_REGION
+          echo "region: ${region} ######################"
+
+          fullname="${account}.dkr.ecr.${region}.amazonaws.com/${image_name}:latest"
+          echo "fullname: ${fullname} ######################"
+
+          # If the repository doesn't exist in ECR, create it.
+
+          set +e # the next command fail by design to check if the ecr repo exists...
+          aws ecr describe-repositories --repository-names "${image_name}"
+          ecr_repo_exists=$?
+          set -e
+
+          if [ $ecr_repo_exists -ne 0 ]
+          then
+            aws ecr create-repository --repository-name "${image_name}"
+          fi
+
+          # Log into Docker
+          aws ecr get-login-password --region ${region}|docker login --username AWS --password-stdin ${fullname}
+
+          # Build the docker image locally with the image name and then push it to ECR
+          # with the full name.
+
+          docker build -t ${image_name} -f Dockerfile.train .
+          docker tag ${image_name} ${fullname}
+
+          docker push ${fullname}
+
+          echo "Docker push ended at $(date)"
+        env: # see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
