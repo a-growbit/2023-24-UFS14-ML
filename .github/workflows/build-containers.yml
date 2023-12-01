@@ -6,7 +6,88 @@ permissions:
   contents: write
 
 jobs:
-  all-that-glitter:
+  my-custom-sagemaker-inference-image:
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+      - name: List files in the repository
+        run: |
+          ls ${{ github.workspace }}
+      - run: echo "🍏 This job's status is ${{ job.status }}."
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+          aws --version
+      - name: Show AWS CLI version
+        run: aws --version
+      - name: Show current AWS CLI user
+        run: aws sts get-caller-identity
+        env: # see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Docker ECR login
+        run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-inference:1.5.0-cpu-py3
+        env: # see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Docker build my-custom-sagemaker-inference-image
+        run: |
+          # Specify an image name
+          image_name=my-custom-sagemaker-inference-image
+          echo "image_name: ${image_name} ######################"
+
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "account: ${account} ######################"
+
+          # Get the region defined in the current configuration (default to us-west-2 if none defined)
+          region=$AWS_DEFAULT_REGION
+          echo "region: ${region} ######################"
+
+          fullname="${account}.dkr.ecr.${region}.amazonaws.com/${image_name}:latest"
+          echo "fullname: ${fullname} ######################"
+
+          # If the repository doesn't exist in ECR, create it.
+
+          set +e # the next command fail by design to check if the ecr repo exists...
+          aws ecr describe-repositories --repository-names "${image_name}"
+          ecr_repo_exists=$?
+          set -e
+
+          if [ $ecr_repo_exists -ne 0 ]
+          then
+            aws ecr create-repository --repository-name "${image_name}"
+          fi
+
+          # Log into Docker
+          aws ecr get-login-password --region ${region}|docker login --username AWS --password-stdin ${fullname}
+
+          # Build the docker image locally with the image name and then push it to ECR
+          # with the full name.
+
+          docker build -t ${image_name} -f Dockerfile.inference .
+          docker tag ${image_name} ${fullname}
+
+          docker push ${fullname}
+
+          echo "Docker push ended at $(date)"
+        env: # see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  my-custom-sagemaker-training-image:
     runs-on: ubuntu-22.04
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
